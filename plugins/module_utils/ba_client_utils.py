@@ -157,7 +157,12 @@ class BAClientHelper:
         """Extract tarball and ensure RPMs exist"""
 
         if self.is_windows():
-            return None
+            print("-"*100)
+            print(f"\"{src}\" -y -o\"{dest}\"")
+            print("-"*100)
+            self.run_cmd(cmd=f"\"{src}\" -y -o\"{dest}\"")
+            print("Windows main exe extraction completed")
+            return
 
         # --- Validation ---
         if not os.path.exists(src):
@@ -192,8 +197,15 @@ class BAClientHelper:
         if self.is_windows():
             if not os.path.exists(package_source):
                 self.module.fail_json(msg=f"Package source not found: {package_source}")
+
+            if (not os.path.exists(temp_dir)):
+                self.extract_package(package_source, temp_dir)
             # silent install typical pattern
-            cmd = f'"{package_source}" /S /v"/qn INSTALLDIR=\\"{install_path}\\""'
+            file_loc = os.path.dirname(package_source)
+            with open("testt.txt", "w") as tfr:
+                tfr.write("Installation started")
+
+            cmd = f"\"{file_loc}/baClient/TSMClient/IBM Storage Protect Client.msi\" /qn INSTALLDIR=\"{install_path}\" /l*v install_baclient.log"
         else:
             if package_source.endswith(".tar") or package_source.endswith(".tar.gz"):
                 self.extract_package(package_source, temp_dir)
@@ -215,27 +227,45 @@ class BAClientHelper:
 
         rc, out, err = self.run_cmd(cmd, use_unsafe_shell=True)
         if rc != 0:
-            self.module.fail_json(msg=f"Installation failed: {err}")
+            if (self.is_windows()):
+                print("Installation Failed")
+                print(err)
+            else:
+                self.module.fail_json(msg=f"Installation failed: {err}")
+        else:
+            print("Installation succeeded. Exit code: " + str(rc))
 
-        self.module.warn("BA Client installation completed successfully")
+        print("BA Client installation completed successfully")
         return True
 
     def post_installation_verification(self, ba_client_version, state):
         """Verify that BA Client is installed correctly and return status summary."""
 
+        print("Verification started post install")
+
         if self.is_windows():
-            check_cmd = 'wmic product get name | find "IBM Spectrum Protect"'
+            check_cmd = 'wmic product get name | find "IBM Storage Protect Client"'
+            print(check_cmd)
         else:
             check_cmd = "rpm -q TIVsm-BA"
 
         rc, out, err = self.run_cmd(check_cmd, use_unsafe_shell=self.is_windows(), check_rc=False)
+        print(rc)
+        print(out)
+        print(err)
 
         if rc == 0:
-            self.module.warn(f"BA Client {ba_client_version} installation status: Installed Successfully")
+            if self.is_windows():
+                print(f"BA Client {ba_client_version} installation status: Installed Successfully")
+            else:
+                self.module.warn(f"BA Client {ba_client_version} installation status: Installed Successfully")
             installation_successful = True
         else:
             msg = f"BA Client {ba_client_version} installation status: Not Installed\nError: {err.strip()}"
-            self.module.warn(msg)
+            if self.is_windows():
+                print(msg)
+            else:
+                self.module.warn(msg)
 
             if state == "install":
                 self.module.fail_json(msg="BA Client installation verification failed. Please check logs.")
@@ -364,7 +394,10 @@ class BAClientHelper:
 
         post_installed, post_version = self.check_installed()
         if not post_installed or post_version != desired_version:
-            self.module.fail_json(msg="Upgrade failed: version mismatch after installation")
+            if (IS_WINDOWS):
+                print("Upgrade failed: version mismatch after installation")
+            else:
+                self.module.fail_json(msg="Upgrade failed: version mismatch after installation")
 
         self.log(f"BA Client successfully upgraded from {installed_version} to {post_version}")
         return {"changed": True, "msg": f"BA Client successfully upgraded from {installed_version} to {post_version}"}

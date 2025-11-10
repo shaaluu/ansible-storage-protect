@@ -180,7 +180,10 @@ def main():
         # Idempotency recheck
         installed, _ = utils.check_installed()
         if installed and not force:
-            module.exit_json(changed=False, msg="BA Client already installed after extraction check")
+            if not HAS_ANSIBLE:
+                print("BA Client already installed after extraction check")
+            else:
+                module.exit_json(changed=False, msg="BA Client already installed after extraction check")
 
         # Pre-checks
         precheck = utils.verify_system_prereqs()
