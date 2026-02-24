@@ -268,6 +268,7 @@ ARTIFACT_PATTERNS = {
     "aix": r"([0-9]+(?:\\.[0-9]+){1,3})-[A-Za-z0-9_-]+-AixPPC\\.bin$",
 }
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Logging setup ----------
 
@@ -328,11 +329,12 @@ class BA_SERVER_SETUP:
         self.ctx = context
         self.log = context["logger"]
 
-        if utils1.fs_exists(path="ansible-vars.json"):
-            self.ansible_vars_data = utils1.read_json_file(path="ansible-vars.json")
+        ansiblevars_path = os.path.join(SCRIPT_DIR, "ansible-vars.json")
+        if utils1.fs_exists(path=ansiblevars_path):
+            self.ansible_vars_data = utils1.read_json_file(path=ansiblevars_path)
             self.ctx["ansible_vars_data"] = self.ansible_vars_data
         else:
-            raise FileNotFoundError("ansible-vars.json")
+            raise FileNotFoundError(ansiblevars_path)
 
 
     def run(self, mode: str) -> bool:
@@ -601,6 +603,10 @@ class BA_SERVER_SETUP:
                 self.log.debug("Converted binary to linux line endings")
 
         install_cmd = install_script_fullfilepath + " -s -input {respfile} -acceptLicense".format(respfile=xmlfile)
+
+        if os_name.lower() == "aix":
+            install_cmd = "ulimit -f unlimited && ulimit -c unlimited && ulimit -n unlimited && " + install_cmd
+            
         self.log.debug("Install command: {}".format(install_cmd))
         
         resp = utils1.exec_run(context=self.ctx, cmd=install_cmd)
