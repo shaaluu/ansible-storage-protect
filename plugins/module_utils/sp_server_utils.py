@@ -632,7 +632,6 @@ def svc_create(context: dict[str, Any], name: str, **kwargs) -> bool:
             - display_name: Display name for Windows (optional)
             - start_type: Windows start type - auto, demand, disabled (optional, default: demand)
             - type: Linux service type - simple, forking, oneshot, etc. (optional, default: simple)
-            - autostart: Enable autostart at boot (optional, default: False)
     
     Returns:
         bool: True if service was created successfully
