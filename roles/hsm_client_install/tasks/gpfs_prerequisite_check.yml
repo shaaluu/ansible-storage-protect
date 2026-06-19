@@ -1,0 +1,126 @@
+---
+# ========================================================================
+# GPFS (IBM Spectrum Scale) Prerequisite Check for HSM Client
+# ========================================================================
+# HSM (Hierarchical Storage Management) requires GPFS to be installed
+# and running before HSM Client can be installed.
+#
+# This task checks for:
+# - GPFS base package installation
+# - Minimum required GPFS packages
+# - GPFS cluster status (optional)
+# ========================================================================
+
+- name: Check if GPFS (IBM Spectrum Scale) base package is installed (Linux)
+  ansible.builtin.command: rpm -q gpfs.base
+  register: gpfs_base_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "Linux"
+
+- name: Check if GPFS (IBM Spectrum Scale) base package is installed (AIX)
+  ansible.builtin.shell: lslpp -l | grep -i gpfs | grep -i base || lslpp -l gpfs.base
+  register: gpfs_base_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "AIX"
+
+- name: Display GPFS base package status
+  ansible.builtin.debug:
+    msg: "{{ 'GPFS base package detected: ' + gpfs_base_check.stdout_lines[0] if gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0 else 'Note: GPFS base package not found via rpm/lslpp (will verify via mmgetstate)' }}"
+
+- name: Check for additional GPFS packages (Linux)
+  ansible.builtin.shell: rpm -qa | grep -i '^gpfs\.'
+  register: gpfs_packages_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "Linux" and gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0
+
+- name: Check for additional GPFS packages (AIX)
+  ansible.builtin.shell: lslpp -l | grep -i 'gpfs'
+  register: gpfs_packages_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "AIX" and gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0
+
+- name: Display installed GPFS packages
+  ansible.builtin.debug:
+    msg: "Installed GPFS packages: {{ gpfs_packages_check.stdout_lines }}"
+  when: gpfs_packages_check is defined and gpfs_packages_check.rc is defined and gpfs_packages_check.rc == 0
+
+- name: Check GPFS cluster status (primary verification)
+  ansible.builtin.shell: /usr/lpp/mmfs/bin/mmgetstate -a || mmgetstate -a
+  register: gpfs_cluster_status
+  ignore_errors: true
+  changed_when: false
+
+- name: Display GPFS cluster status
+  ansible.builtin.debug:
+    msg: "GPFS cluster status: {{ gpfs_cluster_status.stdout_lines }}"
+  when: gpfs_cluster_status is defined and gpfs_cluster_status.rc is defined and gpfs_cluster_status.rc == 0
+
+- name: Set GPFS installed fact based on mmgetstate
+  ansible.builtin.set_fact:
+    gpfs_is_installed: "{{ (gpfs_cluster_status is defined and gpfs_cluster_status.rc is defined and gpfs_cluster_status.rc == 0) or (gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0) }}"
+
+- name: Fail if GPFS is not installed
+  ansible.builtin.fail:
+    msg: |
+      ╔════════════════════════════════════════════════════════════════════════════╗
+      ║                    PREREQUISITE CHECK FAILED                               ║
+      ╚════════════════════════════════════════════════════════════════════════════╝
+      
+      IBM Spectrum Scale (GPFS) is REQUIRED for HSM Client installation.
+      
+      HSM (Hierarchical Storage Management) requires GPFS for:
+        • File system hooks for automatic migration/recall
+        • Policy-based file management
+        • Stub file management
+        • Transparent data movement between storage tiers
+      
+      VERIFICATION FAILED:
+        - mmgetstate command: {{ 'FAILED' if not (gpfs_cluster_status is defined and gpfs_cluster_status.rc is defined and gpfs_cluster_status.rc == 0) else 'SUCCESS' }}
+        - GPFS packages check: {{ 'FAILED' if not (gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0) else 'SUCCESS' }}
+      
+      INSTALLATION STEPS:
+      1. Install IBM Spectrum Scale (GPFS) on this system
+      2. Configure GPFS cluster
+      3. Verify GPFS is active: mmgetstate -a
+      4. Then retry HSM Client installation
+      
+      BYPASS OPTION (for testing only - HSM will NOT function):
+      To bypass this check, set: skip_gpfs_check=true
+      
+      Example:
+        ansible-playbook hsm_client_install_playbook.yml -e "skip_gpfs_check=true"
+      
+      Current system: {{ ansible_hostname }} ({{ detected_os }})
+      
+  when: not gpfs_is_installed and not (skip_gpfs_check | default(false))
+
+- name: Success message when GPFS is detected
+  ansible.builtin.debug:
+    msg: |
+      ✅ GPFS PREREQUISITE CHECK PASSED
+      
+      GPFS Status: ACTIVE
+      Node: {{ ansible_hostname }}
+      Cluster Status: {{ gpfs_cluster_status.stdout_lines | default(['Unknown']) }}
+      
+      Proceeding with HSM Client installation...
+  when: gpfs_is_installed
+
+- name: Warning if GPFS check is bypassed
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  WARNING: GPFS prerequisite check has been BYPASSED!
+      
+      HSM Client will be installed but will NOT function without GPFS.
+      This should only be used for testing module installation logic.
+      
+      HSM features that will NOT work:
+        - Automatic file migration
+        - File recall from tape
+        - Policy-based storage management
+        - Stub file handling
+  when: not gpfs_is_installed and (skip_gpfs_check | default(false))

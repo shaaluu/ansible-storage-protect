@@ -1,0 +1,82 @@
+---
+- name: Query the installed version of TIVsm-HSM (Linux)
+  ansible.builtin.command: rpm -q TIVsm-HSM
+  register: installed_version_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "Linux"
+
+- name: Query the installed version of TIVsm-HSM (AIX)
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
+  register: installed_version_check_aix
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "AIX"
+
+- name: Extract installed version (Linux)
+  ansible.builtin.set_fact:
+    installed_version: >-
+      {{
+        installed_version_check.stdout.split('-')[2] ~ '.' ~
+        installed_version_check.stdout.split('-')[3].split('.')[0]
+      }}
+  when: detected_os == "Linux" and installed_version_check.rc == 0
+
+- name: Extract installed version (AIX)
+  ansible.builtin.set_fact:
+    installed_version: "{{ installed_version_check_aix.stdout_lines[2].split()[1] }}"
+  when: detected_os == "AIX" and installed_version_check_aix.rc == 0
+
+- name: Debug the installed version
+  ansible.builtin.debug:
+    msg: "Installed version: {{ installed_version | default('Not installed') }}"
+
+- name: Normalize the user version and installed version
+  ansible.builtin.set_fact:
+    normalized_user_version: "{{ (hsm_client_version.split('.') + ['0'])[0:4] | join('.') }}"
+    normalized_installed_version: "{{ (installed_version.split('.') + ['0'])[0:4] | join('.') }}"
+  when: installed_version is defined
+
+- name: Debug normalized versions
+  ansible.builtin.debug:
+    msg: >
+      User version (normalized): {{ normalized_user_version }},
+      Installed version (normalized): {{ normalized_installed_version }}
+  when: installed_version is defined
+
+- name: Parsing normalized versions into lists for comparison
+  ansible.builtin.set_fact:
+    user_version_list: "{{ normalized_user_version.split('.') | map('int') | list }}"
+    installed_version_list: "{{ normalized_installed_version.split('.') | map('int') | list }}"
+  when: installed_version is defined
+
+- name: Determining action based on conditions
+  ansible.builtin.set_fact:
+    hsm_client_action: >-
+      {{
+        "install" if
+        (installed_version is not defined and version_available)
+        else
+        "none"
+      }}
+
+- name: Fail if HSM Client is already installed
+  ansible.builtin.fail:
+    msg: >-
+      HSM Client version {{ installed_version }} is already installed.
+      To reinstall, first uninstall the existing version using state: absent.
+      Installed version: {{ installed_version }}
+      Requested version: {{ hsm_client_version }}
+  when:
+    - hsm_client_action == 'none'
+    - installed_version is defined
+
+- name: Fail if version is not available locally
+  ansible.builtin.fail:
+    msg: >-
+      Unable to determine hsm_client_action.
+      Specified version {{ hsm_client_version }} is not available locally.
+      Please ensure the package file exists in the specified location.
+  when:
+    - hsm_client_action == 'none'
+    - installed_version is not defined

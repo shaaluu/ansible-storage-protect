@@ -1,0 +1,24 @@
+---
+# HSM Client version
+# Update this version number when upgrading to a new version
+hsm_client_version: "8.2.2.0"
+
+# Linux HSM Client package source
+# For upgrade: Place the new version tar file in /tmp/ directory
+# Example: /tmp/8.2.2.0-TIV-TSMHSM-LinuxX86.tar
+linux_package_source: "/tmp/{{ hsm_client_version }}-TIV-TSMHSM-LinuxX86.tar"
+
+# AIX HSM Client package source
+# For AIX: Place the tar.Z file in /tmp/ directory
+# Example: /tmp/8.2.2.0-TIV-TSMHSM-AIX.tar.Z
+aix_package_source: "/tmp/{{ hsm_client_version }}-TIV-TSMHSM-AIX.tar.Z"
+
+# Installation paths
+hsm_install_path: "/opt/tivoli/tsm/client/hsm/bin"
+hsm_temp_dir: "/opt/hsmClient"
+
+# Daemon configuration
+hsm_client_start_daemon: true
+
+# State management
+hsm_client_state: "present"  # Can be 'present' or 'absent'

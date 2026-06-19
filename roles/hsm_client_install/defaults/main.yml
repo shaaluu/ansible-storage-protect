@@ -1,0 +1,15 @@
+# Defaults for the HSM Client installation role
+hsm_client_state: "present"  # Can be 'present' or 'absent'
+hsm_client_version: "8.1.25.0"  # User-specified version
+hsm_client_tar_repo: "{{ lookup('env', 'HSM_CLIENT_TAR_REPO_PATH') | default('', true) }}"  # Directory containing .tar files
+hsm_client_extract_dest: "/opt/hsmClient"
+hsm_client_temp_dest: "/tmp/"
+hsm_client_start_daemon: false
+sp_server_compatible_architectures:
+  - x86_64
+  - s390x
+  - ppc64le
+  - powerpc
+  - ppc64
+...
+
