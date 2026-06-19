@@ -72,13 +72,13 @@
 - name: Check if rsync is already installed
   ansible.builtin.command: lslpp -l rsync
   register: rsync_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Check if lsof is already installed
   ansible.builtin.command: lslpp -l lsof
   register: lsof_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Display utility status
@@ -260,44 +260,44 @@
 - name: Checking if GSKit cryptographic library (gskcrypt) is installed
   ansible.builtin.command: lslpp -l gsk8cry64
   register: check_gskcrypt
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # Checking if GSKit SSL library (gskssl) is installed on AIX
 - name: Checking if GSKit SSL library (gskssl) is installed
   ansible.builtin.command: lslpp -l gsk8ssl64
   register: check_gskssl
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-API64 is installed
   ansible.builtin.command: lslpp -l TIVsm.client.api64
   register: check_api64
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-APIcit is installed
   ansible.builtin.command: lslpp -l TIVsm.client.api64cit
   register: check_apicit
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-BA is installed
   ansible.builtin.command: lslpp -l TIVsm.client.ba
   register: check_ba
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-BAcit is installed
   ansible.builtin.command: lslpp -l TIVsm.client.bacit
   register: check_bacit
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if HSM package is installed or not
   ansible.builtin.command: lslpp -l TIVsm.client.hsm
   register: check_hsm
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # ===== Installing packages in sequence using installp (AIX) =====

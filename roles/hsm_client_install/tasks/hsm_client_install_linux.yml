@@ -236,44 +236,44 @@
 - name: Checking if GSKit cryptographic library (gskcrypt) is installed
   ansible.builtin.command: rpm -q gskcrypt64
   register: check_gskcrypt
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # Checking if GSKit SSL library (gskssl) is installed
 - name: Checking if GSKit SSL library (gskssl) is installed
   ansible.builtin.command: rpm -q gskssl64
   register: check_gskssl
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-API64 is installed
   ansible.builtin.command: rpm -q TIVsm-API64
   register: check_api64
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-APIcit is installed
   ansible.builtin.command: rpm -q TIVsm-APIcit
   register: check_apicit
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-BA is installed
   ansible.builtin.command: rpm -q TIVsm-BA
   register: check_ba
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if TIVsm-BAcit is installed
   ansible.builtin.command: rpm -q TIVsm-BAcit
   register: check_bacit
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 - name: Checking if HSM package is installed or not
   ansible.builtin.command: rpm -q TIVsm-HSM
   register: check_hsm
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # ===== Installing packages in sequence =====
