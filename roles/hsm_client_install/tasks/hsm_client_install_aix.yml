@@ -351,8 +351,8 @@
 - name: Installing packages on AIX
   block:
     # Installing GSKit packages using installp - dynamically find BFF files
-    # Pattern matching similar to BA Client Linux approach
-    - name: Install or upgrade GSKit crypt library (gskcrypt) on AIX
+    # Pattern matching similar to BA Client approach
+    - name: Install GSKit crypt library (gskcrypt) on AIX
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'GSKit.*gskcrypt.*') | reject('search', '\\.sig$') | list }}"
       when: extracted_files is defined and extracted_files.files | length > 0 and check_gskcrypt.rc != 0
@@ -360,7 +360,7 @@
       failed_when: false
       changed_when: gskcrypt_install_result.rc == 0
 
-    - name: Install or upgrade GSKit SSL library (gskssl) on AIX
+    - name: Install GSKit SSL library (gskssl) on AIX
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'GSKit.*gskssl.*') | reject('search', '\\.sig$') | list }}"
       when: extracted_files is defined and extracted_files.files | length > 0 and check_gskssl.rc != 0
@@ -375,7 +375,7 @@
       register: perl_install_result
 
     # Installing TIVsm packages using installp - dynamically find BFF files
-    - name: Install or upgrade API64 package on AIX
+    - name: Install API64 package on AIX
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'tivoli\\.tsm\\.client\\.api') | reject('search', '\\.sig$') | list }}"
       when: check_api64.rc != 0
@@ -383,7 +383,7 @@
       ignore_errors: false
       changed_when: api64_install_result.rc == 0
 
-    - name: Install or upgrade BA package on AIX (GPFS version)
+    - name: Install BA package on AIX (GPFS version)
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'tivoli\\.tsm\\.client\\.ba.*gpfs') | reject('search', '\\.sig$') | list }}"
       when: check_ba.rc != 0
@@ -392,7 +392,7 @@
       changed_when: ba_install_result.rc == 0
 
     # Installing HSM package (GPFS version)
-    - name: Install or upgrade HSM package on AIX (GPFS version)
+    - name: Install HSM package on AIX (GPFS version)
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'tivoli\\.tsm\\.client\\.hsm.*gpfs') | reject('search', '\\.sig$') | list }}"
       when: check_hsm.rc != 0
@@ -401,7 +401,7 @@
       changed_when: hsm_install_result.rc == 0
 
     # Optional: Install WebGUI if needed
-    - name: Install or upgrade WebGUI package on AIX (GPFS version)
+    - name: Install WebGUI package on AIX (GPFS version)
       ansible.builtin.command: installp -acXYgd {{ item }} all
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'tivoli\\.tsm\\.client\\.webgui') | reject('search', '\\.sig$') | list }}"
       register: webgui_install_result
@@ -497,7 +497,7 @@
     msg: "HSM Client installation verification failed. Please check logs."
   when: installation_check.rc != 0 and hsm_client_action == "install"
 
-# ============ 'is_installation_successful' fact is used in hsm_client_upgrade_aix.yml =======
+# ============ 'is_installation_successful' fact indicates installation status =======
 
 - name: Installation status summary
   ansible.builtin.set_fact:

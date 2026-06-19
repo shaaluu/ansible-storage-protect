@@ -3,7 +3,7 @@
 # GPFS (IBM Spectrum Scale) Prerequisite Check for HSM Client
 # ========================================================================
 # HSM (Hierarchical Storage Management) requires GPFS to be installed
-# and running before HSM Client can be installed or upgraded.
+# and running before HSM Client can be installed.
 #
 # This task checks for:
 # - GPFS base package installation

@@ -333,9 +333,9 @@
 
 - name: Installing packages
   block:
-    # Installing GSKit crypt library (gskcrypt) - use -Uvh to upgrade if already installed
+    # Installing GSKit crypt library (gskcrypt)
     # Sort by path to get the latest version (higher version number comes last)
-    - name: Install or upgrade GSKit crypt library (gskcrypt)
+    - name: Install GSKit crypt library (gskcrypt)
       ansible.builtin.command: rpm -Uvh {{ item }}
       with_items: >
         {{ extracted_files.files | map(attribute='path')
@@ -350,9 +350,9 @@
       changed_when: gskcrypt_install_result.rc == 0
       failed_when: gskcrypt_install_result.rc != 0 and gskcrypt_install_result.rc != 2
 
-    # Installing GSKit SSL library (gskssl) - use -Uvh to upgrade if already installed
+    # Installing GSKit SSL library (gskssl)
     # Sort by path to get the latest version (higher version number comes last)
-    - name: Install or upgrade GSKit SSL library (gskssl)
+    - name: Install GSKit SSL library (gskssl)
       ansible.builtin.command: "rpm -Uvh {{ item }}"
       with_items: >
         {{ extracted_files.files | map(attribute='path')
@@ -384,8 +384,7 @@
       when: perl_install_result is defined
 
     # Installing TIVsm packages individually (API64, APIcit, BA, BAcit, HSM)
-    # Use rpm -Uvh to support both fresh install and upgrade scenarios
-    - name: Install or upgrade API64 package
+    - name: Install API64 package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-API64\\.') | list }}"
       when: check_api64.rc != 0
@@ -394,7 +393,7 @@
       changed_when: api64_install_result.rc == 0
       failed_when: api64_install_result.rc != 0 and api64_install_result.rc != 2
 
-    - name: Install or upgrade APIcit package
+    - name: Install APIcit package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-APIcit\\.') | list }}"
       when: check_apicit.rc != 0
@@ -404,7 +403,7 @@
       failed_when: apicit_install_result.rc != 0 and apicit_install_result.rc != 2
 
     # Installing BA packages (TIVsm-BA, TIVsm-BAcit)
-    - name: Install or upgrade BA package
+    - name: Install BA package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-BA\\.') | list }}"
       when: check_ba.rc != 0
@@ -413,7 +412,7 @@
       changed_when: ba_install_result.rc == 0
       failed_when: ba_install_result.rc != 0 and ba_install_result.rc != 2
 
-    - name: Install or upgrade BAcit package
+    - name: Install BAcit package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-BAcit\\.') | list }}"
       when: check_bacit.rc != 0
@@ -423,7 +422,7 @@
       failed_when: bacit_install_result.rc != 0 and bacit_install_result.rc != 2
 
     # Installing HSM package (TIVsm-HSM)
-    - name: Install or upgrade HSM package
+    - name: Install HSM package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-HSM\\.') | list }}"
       when: check_hsm.rc != 0
@@ -500,7 +499,7 @@
     msg: "HSM Client installation verification failed. Please check logs."
   when: installation_check.rc != 0 and hsm_client_action == "install"
 
-# ============ 'is_installation_successful' fact is used in hsm_client_upgrade_linux.yml =======
+# ============ 'is_installation_successful' fact indicates installation status =======
 
 - name: Installation status summary
   ansible.builtin.set_fact:

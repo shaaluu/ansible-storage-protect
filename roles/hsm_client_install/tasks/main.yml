@@ -2,18 +2,16 @@
 # Flow:
 # if state == 'present'
 #   1) local_repo_check.yml :- validates whether the passed version is available in local repo on control node.
-#   2) determine_action.yml :- if passed version is available in local_repo, role checks whether the passed version is upper or lower.
-#      if version passed is greater than the already installed then hsm_client_action is set to 'upgrade'
-#      if version passed is lower than already installed, role execution is stopped
-#      if no version is available on remote vm's then hsm_client_action is set to 'install'
+#   2) determine_action.yml :- checks if HSM Client is already installed
+#      if already installed with same version, role execution is stopped
+#      if not installed, hsm_client_action is set to 'install'
 #   3) gpfs_prerequisite_check.yml :- validates that GPFS (IBM Spectrum Scale) is installed (REQUIRED for HSM)
 #   4) system_info :- this role collects the system facts, which are used to perform pre-checks on remote vm's
-#   5) if hsm_client_action == 'install' :- hsm_client_install_linux.yml is executed
-#   6) if hsm_client_action == 'upgrade' :- hsm_client_upgrade_linux.yml is executed
+#   5) if hsm_client_action == 'install' :- hsm_client_install_linux.yml or hsm_client_install_aix.yml is executed
 #
 # ========================================================================
 # if state == 'absent'
-#   1) hsm_client_uninstall_linux.yml is executed
+#   1) hsm_client_uninstall_linux.yml or hsm_client_uninstall_aix.yml is executed
 ---
 # Detect actual OS using uname (more reliable than Ansible facts for AIX)
 - name: Detect operating system using uname
