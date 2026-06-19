@@ -1,0 +1,511 @@
+---
+# Check if HSM Client is already installed on AIX
+- name: Check if HSM Client is already installed (AIX)
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: hsm_client_check
+  ignore_errors: true
+  changed_when: false
+
+# Displaying the installation status
+- name: Display HSM Client status
+  ansible.builtin.debug:
+    msg: "HSM Client is already installed. Skipping installation. Installed Version -> {{ hsm_client_check.stdout }}"
+  when: hsm_client_check is defined and hsm_client_check.rc == 0 and hsm_client_action == "install"
+
+# Skipping the installation if HSM Client is already installed
+- name: Fail or Skip Installation
+  ansible.builtin.meta: end_play
+  when: hsm_client_check is defined and hsm_client_check.rc == 0 and hsm_client_action == "install"
+
+# ================= Pre-checks ==========================
+# Note: GPFS prerequisite check is now performed in main.yml before this task
+
+- name: Warning message if GPFS check is skipped
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  WARNING: GPFS prerequisite check has been skipped!
+      HSM Client will be installed but will NOT function without GPFS.
+      This should only be used for testing the Ansible automation.
+  when: gpfs_check is defined and gpfs_check.rc != 0 and (skip_gpfs_check | default(false))
+
+# System Compatibility checks for installing the HSM client on AIX
+- name: Checking architecture compatibility (AIX)
+  ansible.builtin.set_fact:
+    architecture_compatible: "{{ system_info.Architecture in ['powerpc', 'ppc64', 'ppc64le'] }}"
+
+- name: Get disk space on AIX
+  ansible.builtin.shell: df -m / | tail -1 | awk '{print $3}'
+  register: aix_disk_space
+  changed_when: false
+
+- name: Checking available disk space
+  ansible.builtin.set_fact:
+    avail_disk_space: "{{ (aix_disk_space.stdout | default('0') | int) > 1500 }}"
+
+- name: Compatibility results
+  ansible.builtin.debug:
+    msg: |
+      Architecture check: {{ architecture_compatible }}
+      Disk Space: {{ avail_disk_space }}
+
+- name: Compatibility check result
+  ansible.builtin.debug:
+    msg: "System is compatible"
+  when: architecture_compatible and avail_disk_space
+
+- name: Compatibility check result
+  ansible.builtin.debug:
+    msg: "System is incompatible"
+  when: not (architecture_compatible and avail_disk_space)
+
+- name: Fail if system is incompatible
+  ansible.builtin.fail:
+    msg: >
+      System compatibility checks failed. Please ensure the following
+      requirements are met: - Compatible architecture: powerpc, ppc64
+      - Sufficient disk space: > 1500 MB
+      Architecture check: {{ architecture_compatible }}
+      Disk Space: {{ avail_disk_space }}
+  when: not (architecture_compatible and avail_disk_space)
+
+# Install required utilities on AIX (if available)
+- name: Check if rsync is already installed
+  ansible.builtin.command: lslpp -l rsync
+  register: rsync_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Check if lsof is already installed
+  ansible.builtin.command: lslpp -l lsof
+  register: lsof_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Display utility status
+  ansible.builtin.debug:
+    msg: |
+      Utility Status:
+      - rsync: {{ 'Installed' if rsync_check.rc == 0 else 'Not installed (optional)' }}
+      - lsof: {{ 'Installed' if lsof_check.rc == 0 else 'Not installed (optional)' }}
+
+# ====================== Transferring packages on remote AIX system ======================
+# Note: Package transfer is skipped if HSM is already installed (checked at top of file)
+
+# Check if tar file already exists on remote AIX host in /tmp/
+- name: Check if tar file already exists in /tmp/ on remote AIX host
+  ansible.builtin.stat:
+    path: "{{ hsm_client_temp_dest }}{{ tar_file_path | basename }}"
+  register: remote_tar_file_tmp
+
+# Check if tar file exists at the original path on remote (if tar_file_location is 'remote')
+- name: Check if tar file exists at original location on remote AIX host
+  ansible.builtin.stat:
+    path: "{{ tar_file_path }}"
+  register: remote_tar_file_original
+  when: tar_file_location is defined and tar_file_location == 'remote'
+
+# Check if tar file exists on Ansible controller
+- name: Check if tar file exists on Ansible controller
+  ansible.builtin.stat:
+    path: "{{ tar_file_path }}"
+  delegate_to: localhost
+  register: local_tar_file
+  ignore_errors: true
+  when: tar_file_location is not defined or tar_file_location != 'remote'
+
+# Set the actual tar file path to use (either in /tmp/ or at original location)
+- name: Set actual tar file path for installation
+  ansible.builtin.set_fact:
+    actual_tar_file_path: "{{ tar_file_path if (tar_file_location is defined and tar_file_location == 'remote' and remote_tar_file_original.stat.exists | default(false)) else (hsm_client_temp_dest + (tar_file_path | basename)) }}"
+
+- name: Display file transfer status
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      HSM Package Transfer Status (AIX)
+      ========================================
+      Source: {{ tar_file_path }}
+      Target location: {{ actual_tar_file_path }}
+      
+      File on controller: {{ 'Found' if local_tar_file.stat.exists | default(false) else 'Not found' }}
+      File in /tmp/: {{ 'Already exists' if remote_tar_file_tmp.stat.exists else 'Not found' }}
+      File at original location: {{ 'Found' if (remote_tar_file_original.stat.exists | default(false)) else 'Not checked' }}
+      
+      Action: {{ 'Using file from original location (no copy needed)' if (tar_file_location is defined and tar_file_location == 'remote' and remote_tar_file_original.stat.exists | default(false) and not remote_tar_file_tmp.stat.exists) else ('Skipping transfer (file already in /tmp/)' if remote_tar_file_tmp.stat.exists else ('Transferring from controller...' if local_tar_file.stat.exists | default(false) else 'Using existing file')) }}
+      ========================================
+
+# Transfer files from controller only if not already on remote and exists on controller
+- name: Transferring the packages from controller to the AIX host
+  ansible.builtin.copy:
+    src: "{{ tar_file_path }}"
+    dest: "{{ hsm_client_temp_dest }}"
+    mode: '0644'
+  when:
+    - architecture_compatible
+    - avail_disk_space
+    - not remote_tar_file_tmp.stat.exists
+    - not (remote_tar_file_original.stat.exists | default(false))
+    - local_tar_file.stat.exists | default(false)
+  register: copy_result
+
+- name: Display transfer completion
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      ✅ HSM Package Transfer COMPLETED
+      ========================================
+      File successfully transferred to: {{ hsm_client_temp_dest }}
+      Transfer time: {{ copy_result.delta if copy_result.delta is defined else 'N/A' }}
+      ========================================
+  when: copy_result is defined and copy_result.changed
+
+- name: Display skip message when file already exists in /tmp/
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      ℹ️  HSM Package Transfer SKIPPED
+      ========================================
+      File already exists on remote AIX host: {{ hsm_client_temp_dest }}{{ tar_file_path | basename }}
+      Skipping transfer and using existing file.
+      ========================================
+  when: remote_tar_file_tmp.stat.exists
+
+- name: Display file location for installation
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      ✅ HSM Package Ready for Installation
+      ========================================
+      File location: {{ actual_tar_file_path }}
+      File will be used directly from this location.
+      ========================================
+
+# Validate that tar file is available at the actual path
+- name: Validate tar file availability on remote AIX host
+  ansible.builtin.stat:
+    path: "{{ actual_tar_file_path }}"
+  register: final_tar_check
+
+- name: Fail if tar file is not available on remote AIX host
+  ansible.builtin.fail:
+    msg: |
+      ========================================
+      ❌ HSM Package Not Available
+      ========================================
+      The HSM Client tar file is not available on the remote AIX host.
+      
+      Expected location: {{ actual_tar_file_path }}
+      
+      Please ensure either:
+      1. The tar file exists on the Ansible controller at: {{ tar_file_path }}
+      2. OR the tar file is already present on the remote AIX host
+      
+      Current status:
+      - File on controller: {{ 'Found' if local_tar_file.stat.exists | default(false) else 'Not found' }}
+      - File on remote at {{ actual_tar_file_path }}: {{ 'Found' if final_tar_check.stat.exists else 'Not found' }}
+      ========================================
+  when: not final_tar_check.stat.exists
+
+# ======= Extracting and finding the packages on AIX =======
+
+# creating a temporary directory to extract the packages
+- name: Remove existing /opt/hsmClient directory
+  ansible.builtin.file:
+    path: "{{ hsm_client_extract_dest }}"
+    state: absent
+
+- name: Creating /opt/hsmClient directory
+  ansible.builtin.file:
+    path: "{{ hsm_client_extract_dest }}"
+    state: directory
+    mode: '0755'
+  when: architecture_compatible and avail_disk_space
+
+- name: Extracting the .tar.Z file (AIX compress format)
+  ansible.builtin.shell: uncompress -c "{{ actual_tar_file_path }}" | tar -xvf - -C "{{ hsm_client_extract_dest }}"
+  when:
+    - architecture_compatible
+    - avail_disk_space
+    - actual_tar_file_path.endswith('.tar.Z')
+  register: extraction_result
+  failed_when: extraction_result.rc != 0
+
+- name: Extracting the .tar file (if not compressed)
+  ansible.builtin.unarchive:
+    src: "{{ actual_tar_file_path }}"
+    dest: "{{ hsm_client_extract_dest }}"
+    remote_src: true
+  when:
+    - architecture_compatible
+    - avail_disk_space
+    - not actual_tar_file_path.endswith('.tar.Z')
+  register: extraction_result_tar
+
+- name: Finding extracted files
+  ansible.builtin.find:
+    paths: /opt/hsmClient
+    recurse: true
+  register: extracted_files
+
+- name: List of extracted files
+  ansible.builtin.debug:
+    msg: "Extracted files: {{ extracted_files.files | map(attribute='path') | list }}"
+  when:
+    - extracted_files is defined
+    - extracted_files.files | length > 0
+
+# ===== Checking whether the packages are already installed or not to maintain the idempotency ====
+
+# Checking if GSKit cryptographic library (gskcrypt) is installed on AIX
+- name: Checking if GSKit cryptographic library (gskcrypt) is installed
+  ansible.builtin.command: lslpp -l gsk8cry64
+  register: check_gskcrypt
+  ignore_errors: true
+  changed_when: false
+
+# Checking if GSKit SSL library (gskssl) is installed on AIX
+- name: Checking if GSKit SSL library (gskssl) is installed
+  ansible.builtin.command: lslpp -l gsk8ssl64
+  register: check_gskssl
+  ignore_errors: true
+  changed_when: false
+
+- name: Checking if TIVsm-API64 is installed
+  ansible.builtin.command: lslpp -l TIVsm.client.api64
+  register: check_api64
+  ignore_errors: true
+  changed_when: false
+
+- name: Checking if TIVsm-APIcit is installed
+  ansible.builtin.command: lslpp -l TIVsm.client.api64cit
+  register: check_apicit
+  ignore_errors: true
+  changed_when: false
+
+- name: Checking if TIVsm-BA is installed
+  ansible.builtin.command: lslpp -l TIVsm.client.ba
+  register: check_ba
+  ignore_errors: true
+  changed_when: false
+
+- name: Checking if TIVsm-BAcit is installed
+  ansible.builtin.command: lslpp -l TIVsm.client.bacit
+  register: check_bacit
+  ignore_errors: true
+  changed_when: false
+
+- name: Checking if HSM package is installed or not
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: check_hsm
+  ignore_errors: true
+  changed_when: false
+
+# ===== Installing packages in sequence using installp (AIX) =====
+
+# Clean up incomplete installations first (best practice)
+- name: Clean up incomplete installations (if any)
+  ansible.builtin.command: installp -C
+  ignore_errors: true
+  register: cleanup_result
+
+- name: Display cleanup result
+  ansible.builtin.debug:
+    msg: "Cleanup result: {{ cleanup_result.stdout_lines if cleanup_result.stdout_lines else 'No incomplete installations found' }}"
+
+- name: Installing packages on AIX
+  block:
+    # Installing GSKit packages using installp - dynamically find BFF files
+    # Pattern matching similar to BA Client Linux approach
+    - name: Install or upgrade GSKit crypt library (gskcrypt) on AIX
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'GSKit.*gskcrypt.*')
+              | list }}
+      when: extracted_files is defined and extracted_files.files | length > 0 and check_gskcrypt.rc != 0
+      register: gskcrypt_install_result
+      ignore_errors: true
+      changed_when: gskcrypt_install_result.rc == 0
+
+    - name: Install or upgrade GSKit SSL library (gskssl) on AIX
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'GSKit.*gskssl.*')
+              | list }}
+      when: extracted_files is defined and extracted_files.files | length > 0 and check_gskssl.rc != 0
+      register: gskssl_install_result
+      ignore_errors: true
+      changed_when: gskssl_install_result.rc == 0
+
+    # Install Perl and required Perl modules for BA client (AIX)
+    - name: Install Perl for BA client on AIX
+      ansible.builtin.command: installp -acXYgd /usr/sys/inst.images perl
+      ignore_errors: true
+      register: perl_install_result
+
+    # Installing TIVsm packages using installp - dynamically find BFF files
+    - name: Install or upgrade API64 package on AIX
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'tivoli\.tsm\.client\.api')
+              | list }}
+      when: check_api64.rc != 0
+      register: api64_install_result
+      ignore_errors: false
+      changed_when: api64_install_result.rc == 0
+
+    - name: Install or upgrade BA package on AIX (GPFS version)
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'tivoli\.tsm\.client\.ba.*gpfs')
+              | list }}
+      when: check_ba.rc != 0
+      register: ba_install_result
+      ignore_errors: false
+      changed_when: ba_install_result.rc == 0
+
+    # Installing HSM package (GPFS version)
+    - name: Install or upgrade HSM package on AIX (GPFS version)
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'tivoli\.tsm\.client\.hsm.*gpfs')
+              | list }}
+      when: check_hsm.rc != 0
+      register: hsm_install_result
+      ignore_errors: false
+      changed_when: hsm_install_result.rc == 0
+
+    # Optional: Install WebGUI if needed
+    - name: Install or upgrade WebGUI package on AIX (GPFS version)
+      ansible.builtin.command: installp -acXYgd {{ item }} all
+      with_items: >
+        {{ extracted_files.files | map(attribute='path')
+              | select('search', 'tivoli\.tsm\.client\.webgui')
+              | list }}
+      register: webgui_install_result
+      ignore_errors: true
+      changed_when: webgui_install_result.rc == 0
+
+#    ==== if any error occurs while installing the packages =====
+#  ===  like if package is corrupted, then role will uninstall all the packages which were installed in previous step ===
+#  ===  to maintain the state of the system ===
+  rescue:
+    - name: Define package uninstall order for AIX (new naming convention)
+      ansible.builtin.set_fact:
+        uninstall_packages:
+          # New naming convention packages (GPFS versions)
+          - "tivoli.tsm.client.webgui"
+          - "tivoli.tsm.client.hsm"
+          - "tivoli.tsm.client.ba.64bit"
+          - "tivoli.tsm.client.api.64bit"
+          # GSKit libraries
+          - "gsk8ssl64"
+          - "gsk8cry64"
+
+    - name: Debug all registered variables
+      ansible.builtin.debug:
+        msg: |
+          gskcrypt_install_result: {{ gskcrypt_install_result | default('undefined') }}
+          gskssl_install_result: {{ gskssl_install_result | default('undefined') }}
+          api64_install_result: {{ api64_install_result | default('undefined') }}
+          ba_install_result: {{ ba_install_result | default('undefined') }}
+          hsm_install_result: {{ hsm_install_result | default('undefined') }}
+          webgui_install_result: {{ webgui_install_result | default('undefined') }}
+
+    - name: Uninstall all packages to restore original state (AIX)
+      ansible.builtin.command: "installp -u {{ item }}"
+      with_items: "{{ uninstall_packages }}"
+      ignore_errors: true
+      changed_when: true
+
+    - name: Installation status summary
+      ansible.builtin.set_fact:
+        is_installation_successful: false
+
+    - name: Fail the installation process
+      ansible.builtin.fail:
+        msg: >
+          Installation failed. All packages have been uninstalled to restore system state.
+          Debug information:
+          gskcrypt_install_result: {{ gskcrypt_install_result | default('undefined') }}
+          gskssl_install_result: {{ gskssl_install_result | default('undefined') }}
+          api64_install_result: {{ api64_install_result | default('undefined') }}
+          apicit_install_result: {{ apicit_install_result | default('undefined') }}
+          ba_install_result: {{ ba_install_result | default('undefined') }}
+          bacit_install_result: {{ bacit_install_result | default('undefined') }}
+          hsm_install_result: {{ hsm_install_result | default('undefined') }}
+
+      when: hsm_client_action == "install"
+
+# ============ Post-checks to verify the installation of HSM client on AIX ==========
+# Check for new GPFS naming convention first
+- name: Verify HSM Client installation on AIX (GPFS version)
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
+  register: installation_check_gpfs
+  ignore_errors: true
+  changed_when: false
+
+# Fallback to old naming convention if new one not found
+- name: Verify HSM Client installation on AIX (old naming)
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: installation_check_old
+  ignore_errors: true
+  changed_when: false
+  when: installation_check_gpfs.rc != 0
+
+# Set installation check result
+- name: Set installation verification result
+  ansible.builtin.set_fact:
+    installation_check: "{{ installation_check_gpfs if installation_check_gpfs.rc == 0 else installation_check_old }}"
+
+- name: Extract installed version
+  ansible.builtin.set_fact:
+    installed_version: "{{ installation_check.stdout_lines[4].split()[0] if installation_check.rc == 0 and installation_check.stdout_lines | length > 4 else '8.2.1.0' }}"
+  when: installation_check.rc == 0
+
+- name: Display HSM Client installation status
+  ansible.builtin.debug:
+    msg: |
+      HSM Client installation status: {{ "Installed Successfully" if installation_check.rc == 0 else "Not Installed" }}
+      Installed Version: {{ installed_version | default('N/A') }}
+      Package Name: {{ 'tivoli.tsm.client.hsm.gpfs' if installation_check_gpfs.rc == 0 else 'TIVsm.client.hsm' if installation_check_old.rc == 0 else 'None' }}
+
+- name: Mark install.yml as failed if verification fails
+  ansible.builtin.fail:
+    msg: "HSM Client installation verification failed. Please check logs."
+  when: installation_check.rc != 0 and hsm_client_action == "install"
+
+# ============ 'is_installation_successful' fact is used in hsm_client_upgrade_aix.yml =======
+
+- name: Installation status summary
+  ansible.builtin.set_fact:
+    is_installation_successful: "{{ installation_check.rc == 0 }}"
+
+# =============== HSM Service Information for AIX =============
+# Note: HSM does not use systemd service on AIX
+# HSM uses /etc/rc.gpfshsm script and integrates with GPFS
+# HSM daemons start automatically when GPFS filesystem with HSM is mounted
+
+- name: Display HSM service information for AIX
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      HSM Service Information (AIX)
+      ========================================
+      HSM does not use systemd service on AIX.
+      HSM uses /etc/rc.gpfshsm script and integrates with GPFS.
+      HSM daemons will start automatically when:
+      1. GPFS filesystem is mounted
+      2. HSM is enabled on the filesystem (mmchfs <fs> -z yes)
+      
+      To start HSM manually:
+        /etc/rc.gpfshsm start
+      
+      To check HSM status:
+        ps aux | grep dsm
+      ========================================
+...

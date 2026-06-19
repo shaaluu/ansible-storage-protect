@@ -1,0 +1,349 @@
+---
+# Uninstall HSM Client and all related packages (including BA Client) on AIX
+- name: Check for any TSM/Tivoli packages installed (AIX)
+  ansible.builtin.shell: lslpp -L 2>/dev/null | grep -Ei "TIVsm|tivoli.tsm|filepath" || true
+  register: hsm_packages_check
+  changed_when: false
+
+- name: Check specifically for HSM package
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: hsm_specific_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Check for BA Client packages
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.ba.64bit.base
+  register: ba_specific_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Check for API packages
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.api.64bit
+  register: api_specific_check
+  ignore_errors: true
+  changed_when: false
+
+# Extract version from any installed package (HSM, BA, or API)
+- name: Extract installed version from HSM package (AIX)
+  ansible.builtin.shell: lslpp -l TIVsm.client.hsm 2>/dev/null | grep TIVsm.client.hsm | awk '{print $2}' | head -1
+  register: aix_version_raw
+  ignore_errors: true
+  changed_when: false
+  when: hsm_specific_check.rc == 0
+
+- name: Set installed version from HSM (AIX)
+  ansible.builtin.set_fact:
+    installed_version: "{{ aix_version_raw.stdout | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+).*', '\\1') }}"
+  when:
+    - hsm_specific_check.rc == 0
+    - aix_version_raw.stdout is defined
+    - aix_version_raw.stdout != ''
+
+- name: Extract installed version from BA package (AIX)
+  ansible.builtin.shell: lslpp -l tivoli.tsm.client.ba.64bit.base 2>/dev/null | grep tivoli.tsm.client.ba.64bit.base | awk '{print $2}' | head -1
+  register: aix_ba_version_raw
+  ignore_errors: true
+  changed_when: false
+  when:
+    - hsm_specific_check.rc != 0
+    - ba_specific_check.rc == 0
+
+- name: Set installed version from BA (AIX)
+  ansible.builtin.set_fact:
+    installed_version: "{{ aix_ba_version_raw.stdout | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+).*', '\\1') }}"
+  when:
+    - hsm_specific_check.rc != 0
+    - ba_specific_check.rc == 0
+    - aix_ba_version_raw.stdout is defined
+    - aix_ba_version_raw.stdout != ''
+
+- name: Extract installed version from API package (AIX)
+  ansible.builtin.shell: lslpp -l tivoli.tsm.client.api.64bit 2>/dev/null | grep tivoli.tsm.client.api.64bit | awk '{print $2}' | head -1
+  register: aix_api_version_raw
+  ignore_errors: true
+  changed_when: false
+  when:
+    - hsm_specific_check.rc != 0
+    - ba_specific_check.rc != 0
+    - api_specific_check.rc == 0
+
+- name: Set installed version from API (AIX)
+  ansible.builtin.set_fact:
+    installed_version: "{{ aix_api_version_raw.stdout | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+).*', '\\1') }}"
+  when:
+    - hsm_specific_check.rc != 0
+    - ba_specific_check.rc != 0
+    - api_specific_check.rc == 0
+    - aix_api_version_raw.stdout is defined
+    - aix_api_version_raw.stdout != ''
+
+- name: Display found packages
+  ansible.builtin.debug:
+    msg: "Found TSM/Tivoli packages: {{ hsm_packages_check.stdout_lines }}"
+  when: hsm_packages_check.stdout_lines | length > 0
+
+- name: Display installation status
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      Installed TIVsm Packages Status (AIX)
+      ========================================
+      HSM Client: {{ 'Installed' if hsm_specific_check.rc == 0 else 'Not installed' }}
+      BA Client: {{ 'Installed' if ba_specific_check.rc == 0 else 'Not installed' }}
+      API: {{ 'Installed' if api_specific_check.rc == 0 else 'Not installed' }}
+      
+      Detected version: {{ installed_version | default('N/A') }}
+      Requested uninstall version: {{ hsm_client_version | default('Not specified') }}
+      
+      All TSM packages found:
+      {{ hsm_packages_check.stdout_lines | join('\n      ') if hsm_packages_check.stdout_lines | length > 0 else '      None' }}
+      ========================================
+
+- name: Check if any TSM packages are installed
+  ansible.builtin.set_fact:
+    any_tsm_installed: "{{ hsm_packages_check.stdout_lines | length > 0 }}"
+
+- name: Skip uninstallation if no TSM packages found
+  ansible.builtin.meta: end_play
+  when: not any_tsm_installed
+
+# Version mismatch check - fail if trying to uninstall a different version
+- name: Check for version mismatch (AIX)
+  ansible.builtin.fail:
+    msg: |
+      ========================================
+      ❌ Version Mismatch - Cannot Uninstall
+      ========================================
+      Installed TIVsm version: {{ installed_version }}
+      Requested uninstall version: {{ hsm_client_version }}
+      
+      The installed version does not match the requested uninstall version.
+      
+      Installed packages:
+      {{ hsm_packages_check.stdout_lines | join('\n      ') }}
+      
+      To uninstall the currently installed version, use:
+        -e "hsm_client_version={{ installed_version }}"
+      
+      Or to uninstall regardless of version:
+        -e "force_uninstall=true"
+      ========================================
+  when:
+    - hsm_client_version is defined
+    - hsm_client_version != ''
+    - installed_version is defined
+    - installed_version != ''
+    - installed_version != hsm_client_version
+    - not (force_uninstall | default(false))
+
+- name: Proceeding with uninstallation
+  ansible.builtin.debug:
+    msg: "Found TSM packages. Proceeding with uninstallation of HSM, BA Client, and all dependencies."
+
+# Stop HSM daemon/service (AIX uses GPFS integration)
+- name: Stop HSM daemon (AIX)
+  ansible.builtin.command: /etc/rc.gpfshsm stop
+  ignore_errors: true
+
+- name: Kill any running HSM processes
+  ansible.builtin.command: killall dsmhsm
+  ignore_errors: true
+  changed_when: false
+
+# Backup configuration files before uninstall to a safe location
+- name: Create backup directory for configuration files (AIX)
+  ansible.builtin.file:
+    path: /var/backups/hsm
+    state: directory
+    mode: '0755'
+
+- name: Backup dsm.opt configuration file (AIX)
+  ansible.builtin.copy:
+    src: /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+    dest: /var/backups/hsm/dsm.opt.{{ ansible_date_time.iso8601_basic_short }}
+    remote_src: true
+  ignore_errors: true
+  register: dsm_opt_backup_aix
+
+- name: Backup dsm.sys configuration file (AIX)
+  ansible.builtin.copy:
+    src: /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+    dest: /var/backups/hsm/dsm.sys.{{ ansible_date_time.iso8601_basic_short }}
+    remote_src: true
+  ignore_errors: true
+  register: dsm_sys_backup_aix
+
+- name: Backup BA client configuration if exists (AIX)
+  ansible.builtin.copy:
+    src: /opt/tivoli/tsm/client/ba/bin/dsm.opt
+    dest: /var/backups/hsm/ba_dsm.opt.{{ ansible_date_time.iso8601_basic_short }}
+    remote_src: true
+  ignore_errors: true
+  when: ba_specific_check.rc == 0
+
+- name: Display backup location (AIX)
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      Configuration Backups Created (AIX)
+      ========================================
+      Backup location: /var/backups/hsm/
+      Files backed up:
+      {{ '  - dsm.opt.' + ansible_date_time.iso8601_basic_short if dsm_opt_backup_aix.changed else '  - dsm.opt (not found or failed)' }}
+      {{ '  - dsm.sys.' + ansible_date_time.iso8601_basic_short if dsm_sys_backup_aix.changed else '  - dsm.sys (not found or failed)' }}
+      ========================================
+
+# Create backup directory for packages
+- name: Create backup directory for BFF packages
+  ansible.builtin.file:
+    path: /opt/hsmClientPackagesBk
+    state: directory
+    mode: '0755'
+
+# Backup BFF packages from extraction directory
+- name: Find BFF files in extraction directory
+  ansible.builtin.find:
+    paths: /opt/hsmClient
+    recurse: true
+  register: bff_files_to_backup
+  ignore_errors: true
+
+- name: Backup BFF files
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: /opt/hsmClientPackagesBk/
+    remote_src: true
+  loop: "{{ bff_files_to_backup.files }}"
+  when: bff_files_to_backup.files is defined and bff_files_to_backup.files | length > 0
+  ignore_errors: true
+
+# Define uninstall order (reverse of install order) - AIX package names
+# Includes HSM, BA Client, and all dependencies
+- name: Define package uninstall order for AIX
+  ansible.builtin.set_fact:
+    uninstall_packages:
+      # HSM Client (if installed)
+      - "TIVsm.client.hsm"
+      # BA Client components (installed with HSM or standalone)
+      - "tivoli.tsm.client.webgui"
+      - "tivoli.tsm.client.jbb.64bit"
+      - "tivoli.tsm.client.ba.64bit.web"
+      - "tivoli.tsm.client.ba.64bit.nas"
+      - "tivoli.tsm.client.ba.64bit.image"
+      - "tivoli.tsm.client.ba.64bit.common"
+      - "tivoli.tsm.client.ba.64bit.base"
+      # Old naming convention (for compatibility)
+      - "TIVsm.client.bacit"
+      - "TIVsm.client.ba"
+      # API and dependencies
+      - "tivoli.tsm.client.api.64bit"
+      - "TIVsm.client.api64cit"
+      - "TIVsm.client.api64"
+      # GSKit libraries
+      - "gsk8ssl64"
+      - "gsk8cry64"
+      # GPFS integration
+      - "tivoli.tsm.filepath.rte"
+
+# Uninstall packages using installp (AIX package manager)
+- name: Uninstall HSM Client packages (AIX)
+  block:
+    - name: Check and uninstall each package
+      ansible.builtin.command: "installp -u {{ item }}"
+      loop: "{{ uninstall_packages }}"
+      register: uninstall_results
+      ignore_errors: true
+      changed_when: uninstall_results.rc == 0
+
+    - name: Display uninstall results
+      ansible.builtin.debug:
+        msg: "Package {{ item.item }} uninstall result: {{ 'Success' if item.rc == 0 else 'Failed or not installed' }}"
+      loop: "{{ uninstall_results.results }}"
+      when: uninstall_results is defined
+
+  rescue:
+    - name: Handle uninstall failure
+      ansible.builtin.debug:
+        msg: "Some packages failed to uninstall. Attempting force removal."
+
+    - name: Force uninstall packages (AIX)
+      ansible.builtin.command: "installp -u -f {{ item }}"
+      loop: "{{ uninstall_packages }}"
+      ignore_errors: true
+      changed_when: true
+
+# Verify uninstallation
+- name: Verify HSM Client uninstallation (AIX)
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: verify_uninstall
+  ignore_errors: true
+  changed_when: false
+
+- name: Display uninstallation status
+  ansible.builtin.debug:
+    msg: "HSM Client uninstallation {{ 'successful' if verify_uninstall.rc != 0 else 'failed - package still present' }}"
+
+- name: Check for remaining TIVsm packages (AIX)
+  ansible.builtin.command: lslpp -l 'TIVsm*'
+  register: remaining_packages
+  changed_when: false
+  ignore_errors: true
+
+- name: Display remaining packages
+  ansible.builtin.debug:
+    msg: "Remaining TIVsm packages: {{ remaining_packages.stdout_lines if remaining_packages.stdout_lines | length > 0 else 'None' }}"
+
+# Cleanup extraction directory
+- name: Remove extraction directory
+  ansible.builtin.file:
+    path: /opt/hsmClient
+    state: absent
+  ignore_errors: true
+
+# Cleanup backup directory (only if uninstall was successful)
+- name: Remove backup directory after successful uninstall
+  ansible.builtin.file:
+    path: /opt/hsmClientPackagesBk
+    state: absent
+  when: verify_uninstall.rc != 0
+  ignore_errors: true
+
+# Optional: Clean up tar file from /tmp (AIX)
+- name: Check if tar file exists in /tmp (AIX)
+  ansible.builtin.stat:
+    path: "/tmp/{{ hsm_client_version }}-TIV-TSMHSM-AIX.tar.Z"
+  register: tar_file_check_aix
+  when: hsm_client_version is defined
+
+- name: Remove tar file from /tmp (optional cleanup - AIX)
+  ansible.builtin.file:
+    path: "/tmp/{{ hsm_client_version }}-TIV-TSMHSM-AIX.tar.Z"
+    state: absent
+  when:
+    - hsm_client_version is defined
+    - tar_file_check_aix.stat.exists | default(false)
+    - cleanup_tar_file | default(true)
+  register: tar_cleanup_aix
+
+- name: Display tar file cleanup status (AIX)
+  ansible.builtin.debug:
+    msg: "Tar file removed from /tmp/{{ hsm_client_version }}-TIV-TSMHSM-AIX.tar.Z"
+  when:
+    - tar_cleanup_aix is defined
+    - tar_cleanup_aix.changed
+
+- name: Uninstallation complete
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      ✅ HSM/BA Client Uninstallation Complete (AIX)
+      ========================================
+      Configuration backups saved to: /var/backups/hsm/
+      
+      To restore configurations later:
+        cp /var/backups/hsm/dsm.opt.* /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+        cp /var/backups/hsm/dsm.sys.* /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+      
+      Tar file: {{ 'Removed from /tmp/' if (tar_cleanup_aix is defined and tar_cleanup_aix.changed) else 'Not found in /tmp/ or retained (use -e cleanup_tar_file=false to keep)' }}
+      ========================================
+...

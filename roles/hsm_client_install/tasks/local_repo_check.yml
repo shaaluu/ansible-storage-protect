@@ -1,0 +1,73 @@
+---
+# Skip local repo check if tar_file_path is already provided
+- name: Check if tar_file_path is already provided
+  ansible.builtin.set_fact:
+    tar_file_provided: "{{ tar_file_path is defined and tar_file_path | length > 0 }}"
+
+- name: Use provided tar_file_path
+  ansible.builtin.set_fact:
+    version_available: true
+  when: tar_file_provided
+
+- name: Display provided tar file path
+  ansible.builtin.debug:
+    msg: "Using provided HSM Client tar file: {{ tar_file_path }}"
+  when: tar_file_provided
+
+# Only check local repo if tar_file_path was not provided
+# Search for tar files matching the version pattern (flexible naming)
+- name: Set tar file search pattern based on OS
+  ansible.builtin.set_fact:
+    tar_file_pattern: "{{ hsm_client_version }}*TIV-TSMHSM-*.tar{{ '.Z' if detected_os == 'AIX' else '' }}"
+  when: not tar_file_provided
+
+- name: Search for HSM Client tar file in local repository (Ansible controller)
+  ansible.builtin.find:
+    paths: "{{ hsm_client_tar_repo }}"
+    patterns: "{{ tar_file_pattern }}"
+    file_type: file
+  delegate_to: localhost
+  become: false
+  register: tar_file_search_local
+  when: not tar_file_provided
+  ignore_errors: true
+
+- name: Search for HSM Client tar file on remote host
+  ansible.builtin.find:
+    paths: "{{ hsm_client_tar_repo }}"
+    patterns: "{{ tar_file_pattern }}"
+    file_type: file
+  register: tar_file_search_remote
+  when: not tar_file_provided and (tar_file_search_local.matched is not defined or tar_file_search_local.matched == 0)
+  ignore_errors: true
+
+- name: Set tar file path if found on controller
+  ansible.builtin.set_fact:
+    tar_file_path: "{{ tar_file_search_local.files[0].path }}"
+    version_available: true
+    tar_file_location: "controller"
+  when: not tar_file_provided and tar_file_search_local.matched is defined and tar_file_search_local.matched > 0
+
+- name: Set tar file path if found on remote host
+  ansible.builtin.set_fact:
+    tar_file_path: "{{ tar_file_search_remote.files[0].path }}"
+    version_available: true
+    tar_file_location: "remote"
+  when: not tar_file_provided and (tar_file_search_local.matched is not defined or tar_file_search_local.matched == 0) and tar_file_search_remote.matched is defined and tar_file_search_remote.matched > 0
+
+- name: Display found tar file
+  ansible.builtin.debug:
+    msg: "Found HSM Client tar file on {{ tar_file_location | default('unknown') }}: {{ tar_file_path }}"
+  when: not tar_file_provided and version_available is defined and version_available
+
+- name: Fail if tar file does not exist in repo
+  ansible.builtin.fail:
+    msg: >
+      HSM Client version {{ hsm_client_version }} not found in local or remote repository.
+      Search pattern: {{ tar_file_pattern }}
+      OS detected: {{ detected_os }}
+      Controller search path: {{ hsm_client_tar_repo }}
+      Controller matches: {{ tar_file_search_local.matched | default(0) }}
+      Remote matches: {{ tar_file_search_remote.matched | default(0) }}
+      Please ensure a tar file matching the pattern exists or provide tar_file_path parameter.
+  when: not tar_file_provided and (version_available is not defined or not version_available)

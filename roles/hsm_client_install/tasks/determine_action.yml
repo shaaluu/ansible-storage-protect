@@ -1,0 +1,72 @@
+---
+# Simplified determine_action: Only supports fresh install, not upgrades
+# For upgrades, user must first uninstall then install
+
+- name: Query the installed version of TIVsm-HSM (Linux)
+  ansible.builtin.command: rpm -q TIVsm-HSM
+  register: installed_version_check
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "Linux"
+
+- name: Query the installed version of TIVsm-HSM (AIX)
+  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  register: installed_version_check_aix
+  ignore_errors: true
+  changed_when: false
+  when: detected_os == "AIX"
+
+- name: Extract installed version (Linux)
+  ansible.builtin.set_fact:
+    installed_version: >-
+      {{
+        installed_version_check.stdout.split('-')[2] ~ '.' ~
+        installed_version_check.stdout.split('-')[3].split('.')[0]
+      }}
+  when: detected_os == "Linux" and installed_version_check.rc == 0
+
+- name: Extract installed version (AIX)
+  ansible.builtin.set_fact:
+    installed_version: "{{ installed_version_check_aix.stdout_lines[2].split()[1] }}"
+  when: detected_os == "AIX" and installed_version_check_aix.rc == 0
+
+- name: Debug the installed version
+  ansible.builtin.debug:
+    var: installed_version
+
+- name: Determining action based on conditions (install or none)
+  ansible.builtin.set_fact:
+    hsm_client_action: >-
+      {{
+        "install" if
+        (installed_version is not defined and version_available)
+        else
+        "none"
+      }}
+
+- name: Display action determination result
+  ansible.builtin.debug:
+    msg: |
+      HSM Client Action: {{ hsm_client_action }}
+      Installed Version: {{ installed_version | default('Not installed') }}
+      Requested Version: {{ hsm_client_version }}
+      Package Available: {{ version_available }}
+
+- name: Fail if HSM Client is already installed
+  ansible.builtin.fail:
+    msg: >-
+      HSM Client is already installed (version {{ installed_version }}).
+      This role does not support in-place upgrades.
+      To upgrade, please:
+      1. Run the uninstall playbook first: ansible-playbook hsm_client_uninstall_playbook.yml
+      2. Then run the install playbook with the new version
+  when: installed_version is defined and hsm_client_action == 'none'
+
+- name: Fail if package is not available
+  ansible.builtin.fail:
+    msg: >-
+      Unable to determine hsm_client_action.
+      Specified version {{ hsm_client_version }} is not available locally.
+      Please ensure the package file exists at the specified location.
+  when: hsm_client_action == 'none' and installed_version is not defined
+

@@ -1,10 +1,10 @@
-.vscode
-*.tar.gz
-__pycache__
-# Ignore specific Ansible files
-*.tar
-.idea
-.python-version
 .DS_Store
-**/logs
-**/artifacts
+**/.DS_Store
+ansible.cfg
+inventory.ini
+inventory_Aix.ini
+*.bak
+*~
+__pycache__/
+*.pyc
+*.pyo
