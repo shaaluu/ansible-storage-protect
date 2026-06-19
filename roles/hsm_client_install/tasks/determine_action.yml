@@ -1,7 +1,4 @@
 ---
-# Simplified determine_action: Only supports fresh install, not upgrades
-# For upgrades, user must first uninstall then install
-
 - name: Query the installed version of TIVsm-HSM (Linux)
   ansible.builtin.command: rpm -q TIVsm-HSM
   register: installed_version_check
@@ -10,7 +7,7 @@
   when: detected_os == "Linux"
 
 - name: Query the installed version of TIVsm-HSM (AIX)
-  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
   register: installed_version_check_aix
   ignore_errors: true
   changed_when: false
@@ -32,41 +29,45 @@
 
 - name: Debug the installed version
   ansible.builtin.debug:
-    var: installed_version
+    msg: "Installed version: {{ installed_version | default('Not installed') }}"
 
-- name: Determining action based on conditions (install or none)
+- name: Normalize the user version and installed version
+  ansible.builtin.set_fact:
+    normalized_user_version: "{{ (hsm_client_version.split('.') + ['0'])[0:4] | join('.') }}"
+    normalized_installed_version: "{{ (installed_version.split('.') + ['0'])[0:4] | join('.') }}"
+  when: installed_version is defined
+
+- name: Debug normalized versions
+  ansible.builtin.debug:
+    msg: >
+      User version (normalized): {{ normalized_user_version }},
+      Installed version (normalized): {{ normalized_installed_version }}
+  when: installed_version is defined
+
+- name: Parsing normalized versions into lists for comparison
+  ansible.builtin.set_fact:
+    user_version_list: "{{ normalized_user_version.split('.') | map('int') | list }}"
+    installed_version_list: "{{ normalized_installed_version.split('.') | map('int') | list }}"
+  when: installed_version is defined
+
+- name: Determining action based on conditions
   ansible.builtin.set_fact:
     hsm_client_action: >-
       {{
+        "upgrade" if
+        (installed_version is defined and user_version_list > installed_version_list and version_available)
+        else
         "install" if
         (installed_version is not defined and version_available)
         else
         "none"
       }}
 
-- name: Display action determination result
-  ansible.builtin.debug:
-    msg: |
-      HSM Client Action: {{ hsm_client_action }}
-      Installed Version: {{ installed_version | default('Not installed') }}
-      Requested Version: {{ hsm_client_version }}
-      Package Available: {{ version_available }}
-
-- name: Fail if HSM Client is already installed
+- name: Fail if no hsm_client_action can be determined
   ansible.builtin.fail:
     msg: >-
-      HSM Client is already installed (version {{ installed_version }}).
-      This role does not support in-place upgrades.
-      To upgrade, please:
-      1. Run the uninstall playbook first: ansible-playbook hsm_client_uninstall_playbook.yml
-      2. Then run the install playbook with the new version
-  when: installed_version is defined and hsm_client_action == 'none'
-
-- name: Fail if package is not available
-  ansible.builtin.fail:
-    msg: >-
-      Unable to determine hsm_client_action.
-      Specified version {{ hsm_client_version }} is not available locally.
-      Please ensure the package file exists at the specified location.
-  when: hsm_client_action == 'none' and installed_version is not defined
-
+      Unable to determine hsm_client_action. Either:
+      - Specified version {{ hsm_client_version }} is not available locally, or
+      - Installed version {{ installed_version | default('None') }} is greater or equal to the specified version.
+      The specified version should be greater than the already installed version {{ installed_version | default('None') }}.
+  when: hsm_client_action == 'none'

@@ -3,17 +3,16 @@
 - name: Check if HSM Client is already installed
   ansible.builtin.command: rpm -q TIVsm-HSM
   register: hsm_client_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # Displaying the installation status
-- name: Display HSM Client status
+- name: Display HSM Client installation status
   ansible.builtin.debug:
-    msg: "HSM Client is already installed. Skipping installation. Installed Version -> {{ hsm_client_check.stdout }}"
-  when: hsm_client_check is defined and hsm_client_check.rc == 0 and hsm_client_action == "install"
+    msg: "{{ 'ℹ️  HSM Client is already installed. Skipping installation. Installed Version: ' + hsm_client_check.stdout if hsm_client_check.rc == 0 else '✓  HSM Client not installed. Proceeding with installation.' }}"
 
 # Skipping the installation if HSM Client is already installed
-- name: Fail or Skip Installation
+- name: Skip installation if already installed
   ansible.builtin.meta: end_play
   when: hsm_client_check is defined and hsm_client_check.rc == 0 and hsm_client_action == "install"
 
@@ -31,7 +30,7 @@
 # System Compatibility checks for installing the HSM client
 - name: Checking architecture compatibility
   ansible.builtin.set_fact:
-    architecture_compatible: "{{ (system_info.Architecture | first) in sp_server_compatible_architectures }}"
+    architecture_compatible: "{{ ansible_architecture in sp_server_compatible_architectures }}"
 
 - name: Checking available disk space
   ansible.builtin.set_fact:
@@ -63,15 +62,41 @@
       Disk Space: {{ avail_disk_space }}
   when: not (architecture_compatible and avail_disk_space)
 
+- name: Check if rsync is already installed
+  ansible.builtin.command: which rsync
+  register: rsync_check
+  ignore_errors: true
+  changed_when: false
+  failed_when: false
+
 - name: Install rsync on remote VMs
   ansible.builtin.package:
     name: rsync
     state: present
+  when: rsync_check.rc != 0
+
+- name: Display rsync status
+  ansible.builtin.debug:
+    msg: "rsync is already installed, skipping installation"
+  when: rsync_check.rc == 0
+
+- name: Check if lsof is already installed
+  ansible.builtin.command: which lsof
+  register: lsof_check
+  ignore_errors: true
+  changed_when: false
+  failed_when: false
 
 - name: Install lsof on remote VMs
   ansible.builtin.package:
     name: lsof
     state: present
+  when: lsof_check.rc != 0
+
+- name: Display lsof status
+  ansible.builtin.debug:
+    msg: "lsof is already installed, skipping installation"
+  when: lsof_check.rc == 0
 
 # ====================== Transferring packages on remote vm's ======================
 
@@ -86,7 +111,7 @@
   ansible.builtin.stat:
     path: "{{ tar_file_path }}"
   register: remote_tar_file_inplace
-  when: tar_file_location == 'remote'
+  when: tar_file_location is defined and tar_file_location == 'remote'
 
 # Check if tar file exists on Ansible controller
 - name: Check if tar file exists on Ansible controller
@@ -95,7 +120,7 @@
   delegate_to: localhost
   register: local_tar_file
   ignore_errors: true
-  when: tar_file_location == 'controller'
+  when: tar_file_location is defined and tar_file_location == 'controller'
 
 - name: Display file transfer status
   ansible.builtin.debug:
@@ -111,7 +136,7 @@
       File on remote (in-place): {{ 'Found' if (tar_file_location == 'remote' and remote_tar_file_inplace.stat.exists | default(false)) else 'N/A' }}
       File on remote (temp): {{ 'Already exists' if remote_tar_file_temp.stat.exists else 'Not found' }}
       
-      Action: {{ 'Using file in-place on remote' if (tar_file_location == 'remote' and remote_tar_file_inplace.stat.exists | default(false)) else ('Skipping transfer (file already in temp)' if remote_tar_file_temp.stat.exists else ('Transferring file...' if (tar_file_location == 'controller' and local_tar_file.stat.exists | default(false)) else 'File not found')) }}
+      Action: {{ 'Using file in-place on remote' if (tar_file_location | default('remote') == 'remote' and remote_tar_file_inplace.stat.exists | default(false)) else ('Skipping transfer (file already in temp)' if remote_tar_file_temp.stat.exists else ('Transferring file...' if (tar_file_location | default('remote') == 'controller' and local_tar_file.stat.exists | default(false)) else 'File not found')) }}
       ========================================
 
 # Transfer files only if not already on remote and exists on controller
@@ -239,6 +264,10 @@
   failed_when: false
   changed_when: false
 
+- name: Display gskcrypt64 status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package gskcrypt64: {{ 'Already installed' if check_gskcrypt.rc == 0 else 'Not installed (will be installed)' }}"
+
 # Checking if GSKit SSL library (gskssl) is installed
 - name: Checking if GSKit SSL library (gskssl) is installed
   ansible.builtin.command: rpm -q gskssl64
@@ -246,11 +275,19 @@
   failed_when: false
   changed_when: false
 
+- name: Display gskssl64 status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package gskssl64: {{ 'Already installed' if check_gskssl.rc == 0 else 'Not installed (will be installed)' }}"
+
 - name: Checking if TIVsm-API64 is installed
   ansible.builtin.command: rpm -q TIVsm-API64
   register: check_api64
   failed_when: false
   changed_when: false
+
+- name: Display TIVsm-API64 status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package TIVsm-API64: {{ 'Already installed' if check_api64.rc == 0 else 'Not installed (will be installed)' }}"
 
 - name: Checking if TIVsm-APIcit is installed
   ansible.builtin.command: rpm -q TIVsm-APIcit
@@ -258,11 +295,19 @@
   failed_when: false
   changed_when: false
 
+- name: Display TIVsm-APIcit status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package TIVsm-APIcit: {{ 'Already installed' if check_apicit.rc == 0 else 'Not installed (will be installed)' }}"
+
 - name: Checking if TIVsm-BA is installed
   ansible.builtin.command: rpm -q TIVsm-BA
   register: check_ba
   failed_when: false
   changed_when: false
+
+- name: Display TIVsm-BA status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package TIVsm-BA: {{ 'Already installed' if check_ba.rc == 0 else 'Not installed (will be installed)' }}"
 
 - name: Checking if TIVsm-BAcit is installed
   ansible.builtin.command: rpm -q TIVsm-BAcit
@@ -270,11 +315,19 @@
   failed_when: false
   changed_when: false
 
+- name: Display TIVsm-BAcit status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package TIVsm-BAcit: {{ 'Already installed' if check_bacit.rc == 0 else 'Not installed (will be installed)' }}"
+
 - name: Checking if HSM package is installed or not
   ansible.builtin.command: rpm -q TIVsm-HSM
   register: check_hsm
   failed_when: false
   changed_when: false
+
+- name: Display TIVsm-HSM status
+  ansible.builtin.debug:
+    msg: "ℹ️  Package TIVsm-HSM: {{ 'Already installed' if check_hsm.rc == 0 else 'Not installed (will be installed)' }}"
 
 # ===== Installing packages in sequence =====
 
@@ -289,10 +342,13 @@
               | select('search', 'gskcrypt.*\.rpm$')
               | reject('search', '_pd\.rpm$')
               | sort | last }}
-      when: extracted_files is defined and extracted_files.files | length > 0
+      when:
+        - extracted_files is defined and extracted_files.files | length > 0
+        - check_gskcrypt.rc != 0
       register: gskcrypt_install_result
       ignore_errors: true
       changed_when: gskcrypt_install_result.rc == 0
+      failed_when: gskcrypt_install_result.rc != 0 and gskcrypt_install_result.rc != 2
 
     # Installing GSKit SSL library (gskssl) - use -Uvh to upgrade if already installed
     # Sort by path to get the latest version (higher version number comes last)
@@ -303,10 +359,13 @@
               | select('search', 'gskssl.*\.rpm$')
               | reject('search', '_pd\.rpm$')
               | sort | last }}
-      when: extracted_files.files is defined and extracted_files.files | length > 0
+      when:
+        - extracted_files.files is defined and extracted_files.files | length > 0
+        - check_gskssl.rc != 0
       register: gskssl_install_result
       ignore_errors: true
       changed_when: gskssl_install_result.rc == 0
+      failed_when: gskssl_install_result.rc != 0 and gskssl_install_result.rc != 2
 
     # Install Perl and required Perl modules for BA client
     - name: Install Perl and required modules for BA client
@@ -316,46 +375,62 @@
           - perl-Env
           - perl-Sys-Syslog
         state: present
-      ignore_errors: true
+      register: perl_install_result
+      failed_when: false
+
+    - name: Display Perl installation status
+      ansible.builtin.debug:
+        msg: "{{ '✓' if perl_install_result.changed else 'ℹ️' }}  Perl modules: {{ 'Installed successfully' if perl_install_result.changed else 'Already installed or skipped (python3-dnf may be missing)' }}"
+      when: perl_install_result is defined
 
     # Installing TIVsm packages individually (API64, APIcit, BA, BAcit, HSM)
     # Use rpm -Uvh to support both fresh install and upgrade scenarios
     - name: Install or upgrade API64 package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-API64\\.') | list }}"
+      when: check_api64.rc != 0
       register: api64_install_result
-      ignore_errors: false
+      ignore_errors: true
       changed_when: api64_install_result.rc == 0
+      failed_when: api64_install_result.rc != 0 and api64_install_result.rc != 2
 
     - name: Install or upgrade APIcit package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-APIcit\\.') | list }}"
+      when: check_apicit.rc != 0
       register: apicit_install_result
-      ignore_errors: false
+      ignore_errors: true
       changed_when: apicit_install_result.rc == 0
+      failed_when: apicit_install_result.rc != 0 and apicit_install_result.rc != 2
 
     # Installing BA packages (TIVsm-BA, TIVsm-BAcit)
     - name: Install or upgrade BA package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-BA\\.') | list }}"
+      when: check_ba.rc != 0
       register: ba_install_result
-      ignore_errors: false
+      ignore_errors: true
       changed_when: ba_install_result.rc == 0
+      failed_when: ba_install_result.rc != 0 and ba_install_result.rc != 2
 
     - name: Install or upgrade BAcit package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-BAcit\\.') | list }}"
+      when: check_bacit.rc != 0
       register: bacit_install_result
-      ignore_errors: false
+      ignore_errors: true
       changed_when: bacit_install_result.rc == 0
+      failed_when: bacit_install_result.rc != 0 and bacit_install_result.rc != 2
 
     # Installing HSM package (TIVsm-HSM)
     - name: Install or upgrade HSM package
       ansible.builtin.command: "rpm -Uvh --nodeps {{ item }}"
       with_items: "{{ extracted_files.files | map(attribute='path') | select('search', 'TIVsm-HSM\\.') | list }}"
+      when: check_hsm.rc != 0
       register: hsm_install_result
-      ignore_errors: false
+      ignore_errors: true
       changed_when: hsm_install_result.rc == 0
+      failed_when: hsm_install_result.rc != 0 and hsm_install_result.rc != 2
 
 #    ==== if any error occurs while installing the packages =====
 #  ===  like if package is corrupted, then role will uninstall all the packages which were installed in previous step ===
@@ -455,4 +530,3 @@
         ps aux | grep dsm
       ========================================
 ...
-

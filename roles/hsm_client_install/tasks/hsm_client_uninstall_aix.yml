@@ -57,6 +57,49 @@
     - aix_ba_version_raw.stdout is defined
     - aix_ba_version_raw.stdout != ''
 
+- name: Display version information (AIX)
+  ansible.builtin.debug:
+    msg: |
+      Installed HSM Client version: {{ installed_version | default('Not installed') }}
+      Version specified in host_vars: {{ hsm_client_version | default('Not specified') }}
+  when: installed_version is defined
+
+- name: Validate version match before uninstall (AIX)
+  ansible.builtin.fail:
+    msg: |
+      ============================================================
+      VERSION MISMATCH - UNINSTALL ABORTED
+      ============================================================
+      
+      Installed HSM Client version: {{ installed_version }}
+      Version specified in host_vars: {{ hsm_client_version }}
+      
+      ERROR: The installed version does not match the version
+      specified in your host_vars file ({{ inventory_hostname }}.yml).
+      
+      This is a safety check to prevent accidental uninstallation
+      of the wrong version.
+      
+      ACTIONS:
+      1. If you want to uninstall version {{ installed_version }}:
+         Update playbooks/host_vars/{{ inventory_hostname }}.yml
+         Set: hsm_client_version: "{{ installed_version }}"
+      
+      2. If you want to force uninstall regardless of version:
+         Add this variable to your playbook execution:
+         -e "force_uninstall=yes"
+      
+      3. To check what's installed on this host:
+         ansible {{ inventory_hostname }} -i playbooks/inventory/petascale.ini \
+           -m shell -a "lslpp -l TIVsm.client.hsm" --become
+      
+      ============================================================
+  when:
+    - installed_version is defined
+    - hsm_client_version is defined
+    - installed_version != hsm_client_version
+    - force_uninstall is not defined or force_uninstall != "yes"
+
 - name: Extract installed version from API package (AIX)
   ansible.builtin.shell: lslpp -l tivoli.tsm.client.api.64bit 2>/dev/null | grep tivoli.tsm.client.api.64bit | awk '{print $2}' | head -1
   register: aix_api_version_raw
@@ -239,9 +282,12 @@
       - "tivoli.tsm.client.api.64bit"
       - "TIVsm.client.api64cit"
       - "TIVsm.client.api64"
-      # GSKit libraries
-      - "gsk8ssl64"
-      - "gsk8cry64"
+      # GSKit libraries - MUST be uninstalled with BA/HSM Client
+      # WARNING: Do NOT install BA/HSM Client on same node as SP Server!
+      # Different components require different GSKit versions which will conflict.
+      # See deployment guide for proper node separation.
+      - "GSKit8.gskssl64.ppc.rte"
+      - "GSKit8.gskcrypt64.ppc.rte"
       # GPFS integration
       - "tivoli.tsm.filepath.rte"
 
@@ -249,7 +295,7 @@
 - name: Uninstall HSM Client packages (AIX)
   block:
     - name: Check and uninstall each package
-      ansible.builtin.command: "installp -u {{ item }}"
+      ansible.builtin.command: "installp -u -g {{ item }}"
       loop: "{{ uninstall_packages }}"
       register: uninstall_results
       ignore_errors: true

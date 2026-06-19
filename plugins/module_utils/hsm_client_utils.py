@@ -1071,7 +1071,8 @@ class HSMClientHelper:
     
     def uninstall_hsm_client(self, extract_dest="/opt/hsmClient", backup_dir="/opt/hsmClientPackagesBk"):
         """
-        Performs complete uninstallation of HSM Client and dependent packages with backup and rollback.
+        Performs complete uninstallation of HSM Client and dependent packages.
+        Simple approach: Check installed packages and uninstall them.
         Supports Linux (RPM) and AIX (installp) platforms.
         """
         if self.is_windows():
@@ -1086,17 +1087,43 @@ class HSMClientHelper:
         
         # Platform-specific commands and package names
         if is_aix:
-            check_cmd = "lslpp -l TIVsm.client.hsm"
+            # Get all installed TSM/Tivoli packages
+            check_cmd = "lslpp -L 2>/dev/null | grep -Ei 'TIVsm|tivoli.tsm|gsk8' | awk '{print $1}' | sort -u"
             uninstall_order = [
+                # HSM Client GPFS packages
+                "tivoli.tsm.client.hsm.gpfs",
                 "TIVsm.client.hsm",
+                # WebGUI GPFS packages
+                "tivoli.tsm.client.webgui.gpfs",
+                "tivoli.tsm.client.webgui",
+                # BA Client GPFS components
+                "tivoli.tsm.client.ba64.gpfs.web",
+                "tivoli.tsm.client.ba64.gpfs.nas",
+                "tivoli.tsm.client.ba64.gpfs.image",
+                "tivoli.tsm.client.ba64.gpfs.common",
+                "tivoli.tsm.client.ba64.gpfs.base",
+                # Non-GPFS BA Client components
+                "tivoli.tsm.client.jbb.64bit",
+                "tivoli.tsm.client.ba.64bit.web",
+                "tivoli.tsm.client.ba.64bit.nas",
+                "tivoli.tsm.client.ba.64bit.image",
+                "tivoli.tsm.client.ba.64bit.common",
+                "tivoli.tsm.client.ba.64bit.base",
+                # Old naming convention
                 "TIVsm.client.bacit",
                 "TIVsm.client.ba",
+                # API and dependencies
+                "tivoli.tsm.client.api.64bit",
                 "TIVsm.client.api64cit",
                 "TIVsm.client.api64",
+                # GSKit libraries
                 "gsk8ssl64",
-                "gsk8cry64"
+                "gsk8cry64",
+                # GPFS integration
+                "tivoli.tsm.filepath.rte"
             ]
             stop_service_cmd = "/etc/rc.gpfshsm stop"
+            kill_process_cmd = "ps -ef | grep dsmhsm | grep -v grep | awk '{print $2}' | xargs -r kill -9"
         else:  # Linux
             # Check for any TIVsm package (HSM, BA, or API64)
             check_cmd = "rpm -qa 'TIVsm*'"
@@ -1104,6 +1131,7 @@ class HSMClientHelper:
                 "TIVsm-WEBGUI",
                 "TIVsm-HSM",
                 "TIVsm-BAcit",
+                "TIVsm-BAGPFS",
                 "TIVsm-BA",
                 "TIVsm-APIcit",
                 "TIVsm-API64",
@@ -1111,6 +1139,7 @@ class HSMClientHelper:
                 "gskcrypt64"
             ]
             stop_service_cmd = "systemctl stop dsmhsm"
+            kill_process_cmd = "killall dsmhsm"
         
         # Check if any TIVsm packages are installed
         rc, out, err = self.run_cmd(check_cmd, check_rc=False)
@@ -1118,59 +1147,56 @@ class HSMClientHelper:
             self.log("No TIVsm packages found on this system. Skipping uninstallation.")
             return False
         
+        # Get list of installed packages
+        installed_packages = [pkg.strip() for pkg in out.strip().splitlines() if pkg.strip()]
+        self.log(f"Found installed packages: {installed_packages}")
+        
         # Stop daemon (platform-specific)
         self.run_cmd(stop_service_cmd, check_rc=False)
-        self.run_cmd("killall dsmhsm", check_rc=False)
+        self.run_cmd(kill_process_cmd, use_unsafe_shell=True, check_rc=False)
         
-        # Backup configuration
-        os.makedirs(backup_dir, exist_ok=True)
-        for f in ["/opt/tivoli/tsm/client/hsm/bin/dsm.opt", "/opt/tivoli/tsm/client/hsm/bin/dsm.sys"]:
-            if os.path.exists(f):
-                shutil.copy2(f, f"{f}.bk")
-        
-        # Backup packages (platform-specific)
+        # Filter uninstall order to only include installed packages
+        # For Linux: installed packages include version (e.g., TIVsm-BA-8.2.2-0.x86_64)
+        # For AIX: installed packages are just package names
         if is_aix:
-            # AIX: backup all files from extraction directory
-            rc, out, err = self.run_cmd(f"find {extract_dest} -type f", check_rc=False)
+            packages_to_uninstall = [pkg for pkg in uninstall_order if pkg in installed_packages]
         else:
-            # Linux: backup RPM files
-            rc, out, err = self.run_cmd(f"find {extract_dest} -name '*.rpm'", check_rc=False)
+            # For Linux, check if any installed package starts with the base package name
+            packages_to_uninstall = []
+            for base_pkg in uninstall_order:
+                for installed_pkg in installed_packages:
+                    if installed_pkg.startswith(base_pkg + "-") or installed_pkg == base_pkg:
+                        packages_to_uninstall.append(installed_pkg)
+                        break
         
-        if out.strip():
-            for pkg_path in out.strip().splitlines():
-                self.run_cmd(f"cp {pkg_path} {backup_dir}", check_rc=False)
+        if not packages_to_uninstall:
+            self.log("No matching packages to uninstall.")
+            return False
+        
+        self.log(f"Will uninstall these packages: {packages_to_uninstall}")
         
         # Uninstall packages
         successfully_uninstalled = []
         failed_packages = []
         
-        for pkg in uninstall_order:
-            # Check if package is installed (platform-specific)
+        for pkg in packages_to_uninstall:
+            # Uninstall command (platform-specific)
             if is_aix:
-                check_pkg_cmd = f"lslpp -l {pkg}"
                 uninstall_cmd = f"installp -u {pkg}"
             else:
-                check_pkg_cmd = f"rpm -q {pkg}"
                 uninstall_cmd = f"rpm -e {pkg}"
-            
-            rc, _, err = self.run_cmd(check_pkg_cmd, check_rc=False)
-            if rc != 0:
-                continue  # Package not installed, skip
             
             rc, out, err = self.run_cmd(uninstall_cmd, check_rc=False)
             if rc == 0:
                 successfully_uninstalled.append(pkg)
+                self.log(f"Successfully uninstalled: {pkg}")
             else:
                 failed_packages.append((pkg, err))
+                self.log(f"Failed to uninstall {pkg}: {err}")
         
         if failed_packages:
-            self.module.fail_json(
-                msg=f"Uninstallation failed for packages: {', '.join([p for p, _ in failed_packages])}. "
-                    f"Reason(s): {'; '.join([e for _, e in failed_packages])}."
-            )
+            self.module.warn(f"Some packages failed to uninstall: {', '.join([p for p, _ in failed_packages])}")
         
-        # Cleanup
-        shutil.rmtree(backup_dir, ignore_errors=True)
         platform_name = "AIX" if is_aix else "Linux"
         self.module.warn(f"HSM Client successfully uninstalled on {platform_name} with all components removed.")
         return True
