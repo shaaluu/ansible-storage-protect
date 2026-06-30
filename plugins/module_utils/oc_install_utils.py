@@ -109,10 +109,6 @@ OC_SERVICE_COMMANDS = {
     },
 }
 
-DEFAULT_GSA_BASE_URL = (
-    "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
-)
-
 # Stream large GSA binaries to disk; loading multi-GB installers into memory
 # fails on memory-constrained AIX hosts.
 GSA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
@@ -806,7 +802,7 @@ class OCInstallManager:
         if local_search.get("status") and local_search["data"].get("installerfile"):
             return local_search["data"]["installerfile"]
 
-        base_url = self.params.get("gsa_base_url") or DEFAULT_GSA_BASE_URL
+        base_url = self.params.get("gsa_base_url")
         effective_url, filenames = resolve_gsa_listing(
             base_url,
             self.context,

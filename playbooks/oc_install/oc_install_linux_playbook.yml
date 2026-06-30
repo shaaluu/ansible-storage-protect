@@ -16,8 +16,8 @@
       private: true
 
   vars:
-    oc_version: "8.2.1.000"
-    gsa_base_url: "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
+    oc_version: "8.2.2.000"
+    gsa_base_url: ""
     configure: false
 
   tasks:

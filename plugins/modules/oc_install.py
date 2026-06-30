@@ -8,7 +8,6 @@ __metaclass__ = type
 from ansible.module_utils.basic import AnsibleModule, env_fallback
 
 from ..module_utils.oc_install_utils import (
-    DEFAULT_GSA_BASE_URL,
     DEFAULT_INSTALL_DEST,
     GSAAccessError,
     OCInstallManager,
@@ -50,9 +49,8 @@ options:
   gsa_base_url:
     description:
       - Base HTTP URL of the GSA / central artifact repository for NextGenUI installers.
-      - If not set, defaults to the IBM TUC GSA NextGenUI path for 8.2.1.000.
+      - If not set, defaults to the IBM TUC GSA NextGenUI path for 8.2.2.000.
     type: str
-    default: "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
   gsa_username:
     description:
       - Username for HTTP Basic authentication to the GSA artifact repository.
@@ -111,8 +109,6 @@ options:
   ssl_password:
     description:
       - SSL password for the Operations Center HTTPS endpoint.
-      - Must contain at least two non-alphanumeric characters from the IBM-valid set
-        (C(~#$_%^@*_-+=|(){}[]:;<>,.?/)).
       - Can also be supplied via the OC_SSL_PASSWORD environment variable.
     type: str
     required: false
@@ -154,7 +150,7 @@ EXAMPLES = r'''
     gsa_password: "{{ gsa_password }}"
     ssl_password: "{{ vault_oc_ssl_password }}"
     admin_name: tsmuser1
-    gsa_base_url: "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
+    gsa_base_url: ""
   environment:
     STORAGE_PROTECT_SERVERNAME: "{{ sp_server_name }}"
     STORAGE_PROTECT_USERNAME: "{{ sp_admin_user }}"
@@ -162,14 +158,14 @@ EXAMPLES = r'''
 
 - name: Install Operations Center from a pre-staged binary on Windows
   ibm.storage_protect.oc_install:
-    artifact_path: "C:\\temp\\8.2.1.000-IBM-NextGenUI-WindowsX64.exe"
+    artifact_path: "C:\\temp\\8.2.2.000-IBM-NextGenUI-WindowsX64.exe"
     ssl_password: "{{ vault_oc_ssl_password }}"
     configure: false
 
 - name: Install Operations Center on AIX from GSA
   ibm.storage_protect.oc_install:
-    oc_version: "8.2.1.000"
-    gsa_base_url: "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
+    oc_version: "8.2.2.000"
+    gsa_base_url: ""
     gsa_username: "{{ gsa_username }}"
     gsa_password: "{{ gsa_password }}"
     ssl_password: "{{ vault_oc_ssl_password }}"
@@ -179,13 +175,6 @@ EXAMPLES = r'''
     profile_id: "IBM Storage Protect"
     configure: false
 
-- name: Install Operations Center on AIX from a pre-staged SPOC binary
-  ibm.storage_protect.oc_install:
-    artifact_path: "/tmp/8.2.1.000-IBM-SPOC-AIX.bin"
-    oc_version: "8.2.1.000"
-    ssl_password: "{{ vault_oc_ssl_password }}"
-    install_location_tsm: "/usr/tivoli/tsm"
-    configure: false
 '''
 
 RETURN = r'''
@@ -220,7 +209,7 @@ def main():
     argument_spec = dict(
         state=dict(type='str', default='present', choices=['present', 'upgrade', 'absent']),
         oc_version=dict(type='str', required=False),
-        gsa_base_url=dict(type='str', default=DEFAULT_GSA_BASE_URL),
+        gsa_base_url=dict(type='str', required=False),
         gsa_username=dict(
             type='str',
             required=False,

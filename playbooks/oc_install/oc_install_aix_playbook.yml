@@ -5,8 +5,8 @@
   become: true
 
   vars:
-    oc_version: "8.2.1.000"
-    gsa_base_url: "http://tucgsa.ibm.com/projects/t/tsmsrv_drvs/8.2.1.000/NextGenUI/"
+    oc_version: "8.2.2.000"
+    gsa_base_url: ""
     # AIX defaults applied automatically when these match Linux paths:
     install_location_tsm: "/usr/tivoli/tsm"
     install_location_im: "/usr/IBM/InstallationManager"
